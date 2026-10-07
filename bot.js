@@ -1,67 +1,68 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const P = require('pino');
 
-const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
-  puppeteer: {
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  }
-});
-
-let BODEGA_JM = [];
 let BOT_ACTIVO = true;
-let CODIGO_PEDIDO = false;
+let BODEGA = [{ nombre: "Zapatilla JM Sport", tallas: "36 a la 39 y 40 a la 44", precio: "$95.000" }];
 
-client.on('ready', async () => {
-  console.log('✅ BOT CONECTADO - JM Cali Sport Shoes');
-  CODIGO_PEDIDO = true;
-  try {
-    const chats = await client.getChats();
-    const difusion = chats.find(c => c.name.toLowerCase().includes('jm sport shoes'));
-    if (difusion) {
-      const msgs = await difusion.fetchMessages({ limit: 8000 });
-      msgs.forEach(m => { if (m.body && m.body.includes('$')) BODEGA_JM.push({ original: m.body }); });
-      console.log(`Bodega cargada: ${BODEGA_JM.length} productos | ACTIVO: ${BOT_ACTIVO}`);
-    }
-  } catch(e){}
-});
+async function start() {
+  const { state, saveCreds } = await useMultiFileAuthState('./auth');
+  const sock = makeWASocket({
+    auth: state,
+    logger: P({ level: 'silent' }),
+    printQRInTerminal: false,
+    browser: ["JM Cali", "Chrome", "1.0"]
+  });
 
-function getTallas(t){ t=t.toLowerCase(); if(t.includes('dama')) return '36 a la 39 EUR'; if(t.includes('hombre')||t.includes('caballero')) return '40 a la 44 EUR'; return '36 a la 39 EUR'; }
+  sock.ev.on('creds.update', saveCreds);
 
-client.on('message', async msg => {
-  try{
-    const chat = await msg.getChat();
-    const texto = msg.body.toLowerCase().trim();
-    if(!chat.isGroup){
-      if(texto==='pausar'||texto==='pausa'){ BOT_ACTIVO=false; await msg.reply('⏸️ Bot PAUSADO ✅\nEscribe "comenzar" para activarlo'); return; }
-      if(texto==='comenzar'||texto==='reanudar'||texto==='activar'){ BOT_ACTIVO=true; await msg.reply('▶️ Bot ACTIVADO ✅'); return; }
-    }
-    if(!BOT_ACTIVO) return;
-    if(!chat.isGroup || chat.name!=='CALI CARTEL 4.0') return;
-    if(!msg.hasMedia) return;
-    if(BODEGA_JM.length===0) return;
-    
-    const itemTexto=BODEGA_JM[0].original;
-    const tallas=getTallas(itemTexto);
-    const precios=itemTexto.match(/\$\s?[\d\.]+/g);
-    const precioTexto=precios?precios.join(' / '):'$95.000';
-    const nombre=itemTexto.split('\n')[0];
-    const respuesta=`Hola! Vi que pediste en CALI CARTEL 4.0 👟\n\n👟 ${nombre}\n👣 Tallas que TENGO: ${tallas}\n💰 Precio: ${precioTexto}\n\n¿Te lo separo? - JM Cali Sport Shoes`;
-    await client.sendMessage(msg.author || msg.from, respuesta);
-  }catch(e){ console.log(e.message); }
-});
-
-(async () => {
-  await client.initialize();
-  
-  setInterval(async () => {
-    if (client.info || CODIGO_PEDIDO) return;
+  if (!state.creds.registered) {
+    await new Promise(r => setTimeout(r, 3000));
     try {
-      console.log('Pidiendo codigo...');
-      const code = await client.requestPairingCode('573005517791');
-      console.log(`\n\n============================\nTU CODIGO: ${code}\nPonlo en WhatsApp > Dispositivos vinculados > Vincular con numero de telefono\n============================\n\n`);
-    } catch (e) {
-      console.log('Esperando para pedir codigo de nuevo...', e.message);
+      const code = await sock.requestPairingCode('573005517791');
+      console.log(`\n\n============================\nTU CODIGO ES: ${code}\nVe a WhatsApp > Dispositivos vinculados > Vincular con numero de telefono > pega ese codigo\n============================\n\n`);
+    } catch(e){ console.log('Error pidiendo codigo', e.message); }
+  }
+
+  sock.ev.on('connection.update', (u) => {
+    if (u.connection === 'open') console.log('✅ BOT CONECTADO - JM Cali Sport Shoes ACTIVO');
+    if (u.connection === 'close') {
+      const reason = u.lastDisconnect?.error?.output?.statusCode;
+      if (reason!== DisconnectReason.loggedOut) start();
     }
-  }, 20000);
-})();
+  });
+
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    const msg = messages[0];
+    if (!msg.message) return;
+    const from = msg.key.remoteJid;
+    const isGroup = from.endsWith('@g.us');
+    const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').toLowerCase().trim();
+    const hasImage =!!msg.message.imageMessage;
+
+    // Comandos privados para pausar
+    if (!isGroup) {
+      if (text === 'pausar' || text === 'pausa') { BOT_ACTIVO = false; await sock.sendMessage(from, { text: '⏸️ Bot PAUSADO. Escribe "comenzar" para activar' }); return; }
+      if (text === 'comenzar' || text === 'activar') { BOT_ACTIVO = true; await sock.sendMessage(from, { text: '▶️ Bot ACTIVADO ✅' }); return; }
+    }
+
+    if (!BOT_ACTIVO) return;
+
+    try {
+      const groupInfo = isGroup? await sock.groupMetadata(from).catch(()=>null) : null;
+      const groupName = groupInfo?.subject || '';
+      if (groupName!== 'CALI CARTEL 4.0') return;
+      if (!hasImage) return;
+
+      const participante = msg.key.participant;
+      if (!participante) return;
+
+      const item = BODEGA[0];
+      const respuesta = `Hola! Vi que pediste en CALI CARTEL 4.0 👟\n\n👟 ${item.nombre}\n👣 Tallas que TENGO: ${item.tallas}\n💰 Precio: ${item.precio}\n\n¿Te lo separo? - JM Cali Sport Shoes`;
+
+      await sock.sendMessage(participante, { text: respuesta });
+      console.log(`Respondido a ${participante}`);
+    } catch(e){ console.log(e.message); }
+  });
+}
+
+start();
