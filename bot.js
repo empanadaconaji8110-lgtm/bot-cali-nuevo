@@ -1,5 +1,4 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
 
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
@@ -11,18 +10,18 @@ const client = new Client({
 
 let BODEGA_JM = [];
 let BOT_ACTIVO = true;
-
-client.on('qr', qr => qrcode.generate(qr, { small: true }));
+let CODIGO_PEDIDO = false;
 
 client.on('ready', async () => {
-  console.log('✅ BOT CONECTADO - BOT ACTIVO');
+  console.log('✅ BOT CONECTADO - JM Cali Sport Shoes');
+  CODIGO_PEDIDO = true;
   try {
     const chats = await client.getChats();
     const difusion = chats.find(c => c.name.toLowerCase().includes('jm sport shoes'));
     if (difusion) {
       const msgs = await difusion.fetchMessages({ limit: 8000 });
       msgs.forEach(m => { if (m.body && m.body.includes('$')) BODEGA_JM.push({ original: m.body }); });
-      console.log(`Bodega cargada: ${BODEGA_JM.length}`);
+      console.log(`Bodega cargada: ${BODEGA_JM.length} productos | ACTIVO: ${BOT_ACTIVO}`);
     }
   } catch(e){}
 });
@@ -34,13 +33,14 @@ client.on('message', async msg => {
     const chat = await msg.getChat();
     const texto = msg.body.toLowerCase().trim();
     if(!chat.isGroup){
-      if(texto==='pausar'||texto==='pausa'){ BOT_ACTIVO=false; await msg.reply('⏸️ Bot PAUSADO ✅'); return; }
+      if(texto==='pausar'||texto==='pausa'){ BOT_ACTIVO=false; await msg.reply('⏸️ Bot PAUSADO ✅\nEscribe "comenzar" para activarlo'); return; }
       if(texto==='comenzar'||texto==='reanudar'||texto==='activar'){ BOT_ACTIVO=true; await msg.reply('▶️ Bot ACTIVADO ✅'); return; }
     }
     if(!BOT_ACTIVO) return;
     if(!chat.isGroup || chat.name!=='CALI CARTEL 4.0') return;
     if(!msg.hasMedia) return;
     if(BODEGA_JM.length===0) return;
+    
     const itemTexto=BODEGA_JM[0].original;
     const tallas=getTallas(itemTexto);
     const precios=itemTexto.match(/\$\s?[\d\.]+/g);
@@ -48,17 +48,20 @@ client.on('message', async msg => {
     const nombre=itemTexto.split('\n')[0];
     const respuesta=`Hola! Vi que pediste en CALI CARTEL 4.0 👟\n\n👟 ${nombre}\n👣 Tallas que TENGO: ${tallas}\n💰 Precio: ${precioTexto}\n\n¿Te lo separo? - JM Cali Sport Shoes`;
     await client.sendMessage(msg.author || msg.from, respuesta);
-  }catch(e){}
+  }catch(e){ console.log(e.message); }
 });
 
 (async () => {
   await client.initialize();
-  // Bucle que te da codigo nuevo cada 25 seg hasta que conectes
+  
   setInterval(async () => {
-    if (client.info) return; // ya esta conectado
+    if (client.info || CODIGO_PEDIDO) return;
     try {
+      console.log('Pidiendo codigo...');
       const code = await client.requestPairingCode('573005517791');
-      console.log(`\n\n\n============================\nTU NUEVO CODIGO ES: ${code}\nESCRIBELO EN WHATSAPP -> VINCULAR CON NUMERO\n============================\n\n\n`);
-    } catch (e) {}
-  }, 25000);
+      console.log(`\n\n============================\nTU CODIGO: ${code}\nPonlo en WhatsApp > Dispositivos vinculados > Vincular con numero de telefono\n============================\n\n`);
+    } catch (e) {
+      console.log('Esperando para pedir codigo de nuevo...', e.message);
+    }
+  }, 20000);
 })();
