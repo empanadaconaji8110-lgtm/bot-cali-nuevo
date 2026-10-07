@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "bot.js",
   "dependencies": {
-    "whatsapp-web.js": "^1.26.0"
+    "@whiskeysockets/baileys": "^6.7.8",
+    "pino": "^9.0.0"
   }
 }
