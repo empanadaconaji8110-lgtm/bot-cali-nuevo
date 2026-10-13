@@ -2,43 +2,91 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, download
 const qrcode = require('qrcode-terminal');
 const P = require('pino');
 const fs = require('fs');
-const { pipeline } = require('@xenova/transformers');
+const sharp = require('sharp');
 
-let BOT_ACTIVO = true;
-let INVENTARIO = [];
-let extractor = null;
+let ACTIVO = true;
+let INV = [];
 
-if (!fs.existsSync('./auth/bodega')) fs.mkdirSync('./auth/bodega', { recursive: true });
-try { if (fs.existsSync('./auth/inventario_ia.json')) INVENTARIO = JSON.parse(fs.readFileSync('./auth/inventario_ia.json')); } catch {}
-function guardar() { fs.writeFileSync('./auth/inventario_ia.json', JSON.stringify(INVENTARIO)); }
-function extraerTallas(t) { const m = t.match(/\b(2[8-9]|3[0-9]|4[0-4])\b/g); return m? [...new Set(m)] : []; }
+if (!fs.existsSync('./auth/bodega')) fs.mkdirSync('./auth/bodega', {recursive:true});
+try { if (fs.existsSync('./auth/inventario_fotos.json')) INV = JSON.parse(fs.readFileSync('./auth/inventario_fotos.json')); } catch {}
 
-async function getEmbedding(filePath) {
-  if (!extractor) extractor = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');
-  const output = await extractor(filePath);
-  return Array.from(output.data);
+function guardar(){ fs.writeFileSync('./auth/inventario_fotos.json', JSON.stringify(INV)); }
+function tallas(t){ const m=t.match(/\b(2[8-9]|3[0-9]|4[0-4])\b/g); return m? [...new Set(m)] : []; }
+
+async function hash(file){
+  const b = await sharp(file).resize(8,8).grayscale().raw().toBuffer();
+  return b;
 }
-function cosine(a,b){
-  let dot=0, na=0, nb=0;
-  for(let i=0;i<a.length;i++){ dot+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
-  return dot/(Math.sqrt(na)*Math.sqrt(nb));
+function parecido(a,b){
+  let d=0; for(let i=0;i<a.length;i++) d+=Math.abs(a[i]-b[i]);
+  return 100 - (d / a.length / 255 * 100);
 }
 
-async function start() {
+async function start(){
   const { state, saveCreds } = await useMultiFileAuthState('./auth');
-  const sock = makeWASocket({ auth: state, logger: P({ level: 'silent' }), browser: ["JM Cali", "Chrome", "1.0"] });
+  const sock = makeWASocket({ auth: state, logger: P({level:'silent'}), browser: ["JM","Chrome","1.0"] });
   sock.ev.on('creds.update', saveCreds);
-
-  sock.ev.on('connection.update', (u) => {
-    if (u.qr) {
-      // ESTE ES EL LINK QUE ABRES EN RAILWAY
-      const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(u.qr)}`;
-      console.log('========================================');
-      console.log('🔗 ABRE ESTE LINK PARA VER EL QR:');
-      console.log(qrLink);
-      console.log('========================================');
-      qrcode.generate(u.qr, { small: true });
+  sock.ev.on('connection.update', u=>{
+    if (u.qr){
+      qrcode.generate(u.qr, {small:true});
+      console.log(`LINK QR: https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(u.qr)}`);
     }
-    if (u.connection === 'open') console.log('✅ CONECTADO CON IA + QR LINK ACTIVO');
-    if (u.connection === 'close' && u.lastDisconnect?.error?.output?.statusCode!== DisconnectReason.loggedOut) start();
+    if (u.connection==='open') console.log('CONECTADO PRUEBA');
+    if (u.connection==='close' && u.lastDisconnect?.error?.output?.statusCode!== DisconnectReason.loggedOut) start();
   });
+
+  sock.ev.on('messages.upsert', async ({messages})=>{
+    const msg = messages[0]; if(!msg?.message) return;
+    const from = msg.key.remoteJid;
+    const meta = await sock.groupMetadata(from).catch(()=>null);
+    const gname = meta?.subject || '';
+    const txt = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').toLowerCase();
+
+    if (gname === 'BODEGA JM'){
+      const im = msg.message.imageMessage;
+      if (im){
+        const t = tallas((im.caption||'').toLowerCase());
+        if (t.length>0){
+          const buf = await downloadMediaMessage(msg, 'buffer', {}, {logger:P({level:'silent'}), reuploadRequest: sock.updateMediaMessage});
+          const path = `./auth/bodega/${Date.now()}.jpg`;
+          fs.writeFileSync(path, buf);
+          const h = await hash(path);
+          INV.push({tallas:t, file:path, h:Array.from(h)});
+          guardar();
+          await sock.sendMessage(from, {text:`Guardado ${t.join('-')} total ${INV.length}`});
+        }
+      }
+      if (txt==='borrar todo'){ INV=[]; guardar(); await sock.sendMessage(from,{text:'Vaciado'}); }
+      return;
+    }
+
+    if (!from.endsWith('@g.us')) return;
+    if (!ACTIVO) return;
+    if (gname!== 'CALI CARTEL4.0 PRUEBA') return;
+
+    const im = msg.message.imageMessage; if(!im) return;
+    const tPedido = tallas((im.caption||'').toLowerCase()); if(tPedido.length===0) return;
+
+    const bufC = await downloadMediaMessage(msg, 'buffer', {}, {logger:P({level:'silent'}), reuploadRequest: sock.updateMediaMessage});
+    const tmp = `./auth/bodega/tmp_${Date.now()}.jpg`;
+    fs.writeFileSync(tmp, bufC);
+    const hC = await hash(tmp);
+    fs.unlinkSync(tmp);
+
+    let best=null, bestS=0;
+    for(const it of INV){
+      if(!it.tallas.some(x=>tPedido.includes(x))) continue;
+      const s = parecido(hC, Buffer.from(it.h));
+      if(s>bestS){ bestS=s; best=it; }
+    }
+    console.log(`SIM ${bestS.toFixed(1)}% para ${tPedido}`);
+
+    if(!best || bestS<70) return;
+
+    await sock.sendMessage(msg.key.participant, {
+      image: fs.readFileSync(best.file),
+      caption: `Talla ${tPedido[0]} disponible - similar ${bestS.toFixed(0)}% - JM Cali`
+    });
+  });
+}
+start();
