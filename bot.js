@@ -12,15 +12,8 @@ try { if (fs.existsSync('./auth/inventario_fotos.json')) INV = JSON.parse(fs.rea
 
 function guardar(){ fs.writeFileSync('./auth/inventario_fotos.json', JSON.stringify(INV)); }
 function tallas(t){ const m=t.match(/\b(2[8-9]|3[0-9]|4[0-4])\b/g); return m? [...new Set(m)] : []; }
-
-async function hash(file){
-  const b = await sharp(file).resize(8,8).grayscale().raw().toBuffer();
-  return b;
-}
-function parecido(a,b){
-  let d=0; for(let i=0;i<a.length;i++) d+=Math.abs(a[i]-b[i]);
-  return 100 - (d / a.length / 255 * 100);
-}
+async function hash(file){ const b = await sharp(file).resize(8,8).grayscale().raw().toBuffer(); return b; }
+function parecido(a,b){ let d=0; for(let i=0;i<a.length;i++) d+=Math.abs(a[i]-b[i]); return 100 - (d / a.length / 255 * 100); }
 
 async function start(){
   const { state, saveCreds } = await useMultiFileAuthState('./auth');
@@ -40,15 +33,28 @@ async function start(){
     const msg = messages[0]; if(!msg?.message) return;
     const from = msg.key.remoteJid;
     let gname = '';
-    try{
-      const meta = await sock.groupMetadata(from);
-      gname = meta?.subject || '';
-    }catch{}
+    try{ const meta = await sock.groupMetadata(from); gname = meta?.subject || ''; }catch{ gname = 'SIN-NOMBRE'; }
 
     const txt = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').toLowerCase().trim();
 
-    // BODEGA JM - guardar
-    if (gname === 'BODEGA JM'){
+    console.log(`LLEGO: grupo=[${gname}] jid=${from} texto=[${txt}] activo=${ACTIVO} tieneImg=${!!msg.message.imageMessage}`);
+
+    // COMANDOS - AHORA FUNCIONA AUNQUE EL NOMBRE VENGA RARO
+    if (txt === 'pausar' || txt === 'pausa'){
+      ACTIVO = false;
+      await sock.sendMessage(from, {text:'⏸️ Bot pausado'});
+      console.log('PAUSADO');
+      return;
+    }
+    if (txt === 'comenzar' || txt === 'reanudar' || txt === 'play'){
+      ACTIVO = true;
+      await sock.sendMessage(from, {text:'▶️ Bot activo - ya respondo en PRUEBA'});
+      console.log('ACTIVADO');
+      return;
+    }
+
+    // BODEGA JM
+    if (gname.toLowerCase().includes('bodega')){
       const im = msg.message.imageMessage;
       if (im){
         const t = tallas((im.caption||'').toLowerCase());
@@ -66,26 +72,16 @@ async function start(){
       return;
     }
 
-    // COMANDOS PRUEBA - pausar / comenzar
-    if (gname === 'CALI CARTEL4.0 PRUEBA'){
-      if (txt === 'pausar' || txt === 'pausa'){
-        ACTIVO = false;
-        await sock.sendMessage(from, {text:'⏸️ Bot pausado'});
-        return;
-      }
-      if (txt === 'comenzar' || txt === 'reanudar' || txt === 'play'){
-        ACTIVO = true;
-        await sock.sendMessage(from, {text:'▶️ Bot activo'});
-        return;
-      }
+    if (!from.endsWith('@g.us')) return;
+    if (!ACTIVO){ console.log('IGNORADO POR PAUSA'); return; }
+    if (!gname.toLowerCase().includes('prueba') &&!gname.includes('SIN-NOMBRE')){
+      console.log('NO ES GRUPO PRUEBA');
+      return;
     }
 
-    if (!from.endsWith('@g.us')) return;
-    if (!ACTIVO) return;
-    if (gname!== 'CALI CARTEL4.0 PRUEBA') return;
-
-    const im = msg.message.imageMessage; if(!im) return;
-    const tPedido = tallas((im.caption||'').toLowerCase()); if(tPedido.length===0) return;
+    const im = msg.message.imageMessage; if(!im){ console.log('SIN IMAGEN'); return; }
+    const tPedido = tallas((im.caption||'').toLowerCase());
+    if(tPedido.length===0){ console.log('SIN TALLA EN CAPTION'); return; }
 
     const bufC = await downloadMediaMessage(msg, 'buffer', {}, {logger:P({level:'silent'}), reuploadRequest: sock.updateMediaMessage});
     const tmp = `./auth/bodega/tmp_${Date.now()}.jpg`;
@@ -99,17 +95,16 @@ async function start(){
       const s = parecido(hC, Buffer.from(it.h));
       if(s>bestS){ bestS=s; best=it; }
     }
-    console.log(`SIM ${bestS.toFixed(1)}% para ${tPedido}`);
+    console.log(`SIM ${bestS.toFixed(1)}% para ${tPedido} inventario=${INV.length}`);
 
-    if(!best || bestS<70) return;
+    if(!best || bestS<70){ await sock.sendMessage(from, {text:`No tengo ${tPedido.join('-')} parecido (${bestS.toFixed(0)}%)`}); return; }
 
     await sock.sendMessage(msg.key.participant, {
       image: fs.readFileSync(best.file),
       caption: `Talla ${tPedido[0]} disponible - similar ${bestS.toFixed(0)}% - JM Cali`
     });
-   }catch(e){
-     console.log('skip', e.message);
-   }
+    await sock.sendMessage(from, {text:`Enviado al privado ${tPedido[0]} ${bestS.toFixed(0)}%`});
+   }catch(e){ console.log('skip', e.message); }
   });
 }
 start();
