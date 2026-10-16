@@ -7,7 +7,7 @@
     "pino": "^9.0.0",
     "qrcode-terminal": "^0.12.0",
     "sharp": "^0.33.0",
-    "【entity-tesseract¦canonical_name=Tesseract】.js": "^5.1.1",
+    "tesseract.js": "^5.1.1",
     "ws": "^8.17.0"
   }
 }
