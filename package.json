@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "main": "bot.js",
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.8",
+    "@whiskeysockets/baileys": "^6.7.17",
     "pino": "^9.0.0",
     "qrcode-terminal": "^0.12.0",
-    "sharp": "^0.33.0"
+    "sharp": "^0.33.0",
+    "【entity-tesseract¦canonical_name=Tesseract】.js": "^5.1.1",
+    "ws": "^8.17.0"
   }
 }
