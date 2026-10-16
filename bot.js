@@ -16,9 +16,7 @@ function guardar(){ fs.writeFileSync('./auth/inventario_fotos.json', JSON.string
 
 function tallas(texto){
   if(!texto) return [];
-  let t = texto.toString().toLowerCase()
-  .replace(/[^0-9]/g,' ')
-  .replace(/\s+/g,' ');
+  let t = texto.toString().toLowerCase().replace(/[^0-9]/g,' ');
   const m = t.match(/\b(2[8-9]|3[0-9]|4[0-4])\b/g);
   return m? [...new Set(m)] : [];
 }
@@ -32,9 +30,10 @@ function parecido(a,b){
 }
 async function leerTextoFoto(path){
   try{
-    await sharp(path).resize(1500).grayscale().normalize().toFile(path + '_ocr.jpg');
-    const { data: { text } } = await Tesseract.recognize(path + '_ocr.jpg', 'eng');
-    try{ fs.unlinkSync(path + '_ocr.jpg'); }catch{}
+    const pre = path + '_ocr.jpg';
+    await sharp(path).resize(1500).grayscale().normalize().toFile(pre);
+    const { data: { text } } = await 【entity-Tesseract¦canonical_name=Tesseract】.recognize(pre, 'eng');
+    try{ fs.unlinkSync(pre); }catch{}
     console.log(`OCR: [${text.trim().replace(/\n/g,' ')}] -> ${tallas(text)}`);
     return text;
   }catch(e){ console.log('OCR error', e.message); return ''; }
@@ -43,14 +42,13 @@ async function procesarCola(sock){
   if(OCUPADO || COLA.length===0) return;
   OCUPADO = true;
   const { msg, tmp, caption } = COLA.shift();
-  console.log('Esperando 10s para pensar zapato...');
+  console.log('Analizando 10s...');
   await new Promise(r=>setTimeout(r, 10000));
   try{
     let textoTotal = caption + ' ' + await leerTextoFoto(tmp);
     let tPedido = tallas(textoTotal);
-    console.log(`Talla detectada en foto: ${tPedido}`);
     if(tPedido.length===0){
-      console.log('Sin talla, callado no escribo');
+      console.log('Sin talla, callado');
       try{ fs.unlinkSync(tmp); }catch{}
       OCUPADO=false;
       setTimeout(()=>procesarCola(sock), 1000);
@@ -64,9 +62,9 @@ async function procesarCola(sock){
       const s = parecido(hC, Buffer.from(it.h));
       if(s>bestS){ bestS=s; best=it; }
     }
-    console.log(`Pedido ${tPedido} mejor ${bestS.toFixed(1)}%`);
-    if(!best || bestS<65){
-      console.log('No tengo esa talla, no escribo nada');
+    console.log(`Pedido ${tPedido} sim ${bestS.toFixed(1)}%`);
+    if(!best || bestS<70){
+      console.log('No disponible, no escribo nada');
       OCUPADO=false;
       setTimeout(()=>procesarCola(sock), 1000);
       return;
@@ -75,7 +73,6 @@ async function procesarCola(sock){
       image: fs.readFileSync(best.file),
       caption: `La tengo disponible asi como en la foto - Talla ${tPedido[0]} ✅`
     });
-    console.log('Enviado al privado');
   }catch(e){ console.log('Error', e.message); }
   OCUPADO=false;
   setTimeout(()=>procesarCola(sock), 1000);
@@ -98,6 +95,7 @@ async function start(){
     const from=msg.key.remoteJid;
     let gname=''; try{ const m=await sock.groupMetadata(from); gname=m?.subject||''; }catch{}
     const txt=(msg.message.conversation||msg.message.extendedTextMessage?.text||'').toLowerCase().trim();
+    console.log(`LLEGO [${gname}] txt=[${txt}]`);
     if (txt==='pausar'||txt==='pausa'){ ACTIVO=false; await sock.sendMessage(from,{text:'⏸️ Pausado'}); return; }
     if (txt==='comenzar'||txt==='reanudar'||txt==='play'){ ACTIVO=true; await sock.sendMessage(from,{text:'▶️ Activo'}); return; }
     if (gname.toLowerCase().includes('bodega')){
