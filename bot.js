@@ -33,7 +33,7 @@ async function leerTextoFoto(path){
     await sharp(path).grayscale().normalize().sharpen().resize(1000).toFile(pre);
     const { data: { text } } = await 【entity-Tesseract¦canonical_name=Tesseract】.recognize(pre, 'eng');
     try{ fs.unlinkSync(pre); }catch{}
-    console.log(`OCR: [${text.trim()}] -> ${tallas(text)}`);
+    console.log(`OCR: [${text.trim()}] -> tallas ${tallas(text)}`);
     return text;
   }catch(e){ console.log('OCR error', e.message); return ''; }
 }
@@ -51,7 +51,7 @@ async function procesarCola(sock){
     let tPedido = tallas(textoTotal);
 
     if(tPedido.length===0){
-      console.log('Sin talla, callado');
+      console.log('Sin talla detectada, callado');
       try{ fs.unlinkSync(tmp); }catch{}
       OCUPADO=false;
       setTimeout(()=>procesarCola(sock), 1000);
@@ -96,7 +96,7 @@ async function start(){
       qrcode.generate(u.qr, {small:true});
       console.log(`LINK QR: https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(u.qr)}`);
     }
-    if (u.connection==='open') console.log('CONECTADO INV:'+INV.length);
+    if (u.connection==='open') console.log('CONECTADO SOLO CALI CARTEL 4.0 PRUEBA INV:'+INV.length);
     if (u.connection==='close' && u.lastDisconnect?.error?.output?.statusCode!==DisconnectReason.loggedOut) start();
   });
 
@@ -106,7 +106,7 @@ async function start(){
     const from=msg.key.remoteJid;
     let gname=''; try{ const m=await sock.groupMetadata(from); gname=m?.subject||''; }catch{}
     const txt=(msg.message.conversation||msg.message.extendedTextMessage?.text||'').toLowerCase().trim();
-    console.log(`LLEGO [${gname}] txt=[${txt}] cola=${COLA.length}`);
+    console.log(`LLEGO [${gname}] txt=[${txt}]`);
 
     if (txt==='pausar'||txt==='pausa'){ ACTIVO=false; await sock.sendMessage(from,{text:'⏸️ Pausado'}); return; }
     if (txt==='comenzar'||txt==='reanudar'||txt==='play'){ ACTIVO=true; await sock.sendMessage(from,{text:'▶️ Activo'}); return; }
@@ -130,7 +130,10 @@ async function start(){
 
     if(!from.endsWith('@g.us')) return;
     if(!ACTIVO) return;
-    if(!gname.toLowerCase().includes('prueba')) return;
+    // SOLO CALI CARTEL 4.0 PRUEBA
+    if(gname.trim().toLowerCase()!== 'cali cartel 4.0 prueba'){
+      return;
+    }
 
     const im=msg.message.imageMessage; if(!im) return;
     const bufC=await downloadMediaMessage(msg,'buffer',{}, {logger:P({level:'silent'}), reuploadRequest:sock.updateMediaMessage});
@@ -138,7 +141,7 @@ async function start(){
     fs.writeFileSync(tmp,bufC);
 
     COLA.push({ msg, tmp, caption: im.caption||'' });
-    console.log(`En cola ${COLA.length} - esperando 10s`);
+    console.log(`En cola ${COLA.length} - 10s`);
     procesarCola(sock);
 
    }catch(e){ console.log('skip',e.message); }
