@@ -1,12 +1,16 @@
 {
-  "name": "bot-cali-nuevo",
-  "version": "1.0.0",
+  "name": "bot-cali-final",
+  "version": "2.0.0",
   "main": "bot.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node bot.js"
+  },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.17",
     "pino": "^9.0.0",
     "qrcode-terminal": "^0.12.0",
-    "sharp": "^0.33.0",
+    "sharp": "^0.33.4",
     "tesseract.js": "^5.1.1",
     "ws": "^8.17.0"
   }
